@@ -5,23 +5,50 @@ on:
       - master
   pull_request:
     types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build and analyze
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      # This step should build, test and generate coverage reports
-      # - name: Build and test
-      #   run: <build + test + generate coverage reports>
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '14'
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps --no-audit
+
+      - name: Build application
+        run: npm run build
+
+      - name: Run tests and generate coverage
+        run: |
+          CHROME_PATH="$(command -v google-chrome || command -v chromium || true)"
+          if [ -z "$CHROME_PATH" ]; then
+            echo "Chrome/Chromium is required to run Angular tests"
+            exit 1
+          fi
+          printf '#!/bin/sh\nexec "%s" --no-sandbox "$@"\n' "$CHROME_PATH" > /tmp/chrome-ci
+          chmod +x /tmp/chrome-ci
+          export CHROME_BIN=/tmp/chrome-ci
+          npm test -- --watch=false --browsers=ChromeHeadless --code-coverage
+
       - name: Cache SonarQube packages
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
+
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # v8.4.0
         env:
@@ -30,3 +57,5 @@ jobs:
           args: >
             -Dsonar.organization=jonathanxuya
             -Dsonar.projectKey=jonathanxuya_angular-realworld-example-app
+            -Dsonar.sources=src
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
